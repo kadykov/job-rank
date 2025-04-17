@@ -1,0 +1,33 @@
+{
+  "name": "Job Rank",
+  "dockerFile": "Dockerfile",
+  "runArgs": ["--env-file",".devcontainer/devcontainer.env"],
+  "features": {
+    "ghcr.io/devcontainers/features/common-utils:2": {
+      "username": "vscode"
+    },
+    "ghcr.io/guiyomh/features/just:0": {},
+    "ghcr.io/devcontainers/features/node:1": {},
+    "ghcr.io/devcontainers/features/docker-in-docker:2": {}
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "just install",
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "ms-azuretools.vscode-docker",
+        "saoudrizwan.claude-dev",
+        "ms-python.python",
+        "charliermarsh.ruff",
+        "ms-toolsai.jupyter"
+      ]
+    }
+  },
+  "mounts": [
+    {
+      "source": "vscode-home",
+      "target": "/home/vscode",
+      "type": "volume"
+    }
+  ]
+}
