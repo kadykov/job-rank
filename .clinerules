@@ -1,0 +1,10 @@
+# Cline Rules for Job Description Ranker Project
+
+This file captures project-specific patterns, preferences, and intelligence discovered during development.
+
+## Initial Setup (2025-04-18)
+- **LLM:** Using LangChain with OpenAI `gpt-4o-mini`.
+- **Embeddings:** Using `sentence-transformers` with `all-MiniLM-L6-v2`.
+- **Data:** Starting with synthetic Markdown files in `data/cv` and `data/jd`.
+- **Dependencies:** Managed by `uv`.
+- **Core Logic:** Generate "Ideal CV" from JD, embed original CV and Ideal CV, compare with cosine similarity.
