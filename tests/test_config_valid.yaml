@@ -1,0 +1,13 @@
+# Valid test configuration
+cv_path: "data/cv/test_cv.md"
+jd_dir: "data/jd_test"
+llm:
+  model_name: "test-llm-model"
+  temperature: 0.1
+embedding:
+  model_name: "test-embedding-model"
+prompts:
+  system_message_file: "prompts/test_system.txt"
+cache:
+  enabled: false
+  directory: "test_cache"
