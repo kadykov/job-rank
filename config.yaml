@@ -1,0 +1,24 @@
+# Configuration for the Job Description Ranker
+
+# Input data paths
+cv_path: "data/cv/sample_cv.md"
+jd_dir: "data/jd"
+
+# Model configuration
+llm:
+  model_name: "gpt-4o-mini"
+  temperature: 0.2
+embedding:
+  model_name: "all-MiniLM-L6-v2"
+
+# Prompt file paths (relative to project root)
+prompts:
+  system_message_file: "prompts/system_message.txt" # For ideal CV generation
+  explanation_prompt_file: "prompts/explanation_prompt.txt" # For explaining the match
+  # The human message template for ideal CV generation is simple enough to keep in code for now
+  # human_message_template: "Job Description:\n\n{job_description}"
+
+# Caching configuration
+cache:
+  enabled: true
+  directory: "cache" # Directory to store cached ideal CVs and embeddings

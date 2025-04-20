@@ -178,3 +178,6 @@ kadykov-*
 
 # Devcontainer environment
 .devcontainer/devcontainer.env
+
+# Cache files
+cache/

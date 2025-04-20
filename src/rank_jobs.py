@@ -1,0 +1,327 @@
+# Main script for Job Description Ranker
+
+import os
+import glob
+import yaml
+import hashlib # Added for caching
+import numpy as np # Added for saving/loading embeddings
+from pathlib import Path
+from dotenv import load_dotenv
+from langchain_openai import ChatOpenAI
+from langchain.prompts import ChatPromptTemplate, PromptTemplate # Added PromptTemplate
+from langchain.schema.output_parser import StrOutputParser
+from sentence_transformers import SentenceTransformer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# --- Configuration Loading ---
+
+def load_config(config_path="config.yaml"):
+    """Loads configuration from a YAML file."""
+    path = Path(config_path)
+    """Loads configuration from a YAML file."""
+    path = Path(config_path)
+    if not path.is_file():
+        raise FileNotFoundError(f"Configuration file not found at {config_path}")
+    try:
+        with open(path, 'r') as f:
+            config = yaml.safe_load(f)
+        # Basic validation
+        required_keys = ['cv_path', 'jd_dir', 'llm', 'embedding', 'prompts', 'cache']
+        if not all(k in config for k in required_keys):
+             raise ValueError(f"Config file is missing required top-level keys: {required_keys}")
+        if not all(k in config['llm'] for k in ['model_name', 'temperature']):
+             raise ValueError("Config file is missing required 'llm' keys: ['model_name', 'temperature']")
+        if 'model_name' not in config['embedding']:
+             raise ValueError("Config file is missing required 'embedding' key: 'model_name'")
+        # Check for both prompt files now
+        if not all(k in config['prompts'] for k in ['system_message_file', 'explanation_prompt_file']):
+             raise ValueError("Config file is missing required 'prompts' keys: ['system_message_file', 'explanation_prompt_file']")
+        if not all(k in config['cache'] for k in ['enabled', 'directory']):
+             raise ValueError("Config file is missing required 'cache' keys: ['enabled', 'directory']")
+        return config
+    except yaml.YAMLError as e:
+        raise ValueError(f"Error parsing YAML configuration file: {e}")
+    # Let other exceptions (like our explicit ValueErrors for missing keys) propagate
+
+# --- Initialization ---
+
+def load_api_key():
+    """Loads the OpenAI API key from .env file."""
+    load_dotenv()
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY not found in .env file.")
+    return api_key
+
+def initialize_models(api_key, config):
+    """Initializes the LLM and embedding models based on config."""
+    llm_config = config['llm']
+    embedding_config = config['embedding']
+    llm = ChatOpenAI(
+        openai_api_key=api_key,
+        model=llm_config['model_name'],
+        temperature=llm_config['temperature']
+    )
+    embedding_model = SentenceTransformer(embedding_config['model_name'])
+    return llm, embedding_model
+
+# --- Caching Functions ---
+
+def get_cache_key(jd_path, jd_text, config, system_prompt_text):
+    """Generates a unique cache key based on JD content and relevant config."""
+    hasher = hashlib.sha256()
+    hasher.update(jd_path.encode('utf-8'))
+    hasher.update(jd_text.encode('utf-8'))
+    hasher.update(config['llm']['model_name'].encode('utf-8'))
+    hasher.update(str(config['llm']['temperature']).encode('utf-8'))
+    hasher.update(config['embedding']['model_name'].encode('utf-8'))
+    hasher.update(system_prompt_text.encode('utf-8')) # Include prompt in hash
+    return hasher.hexdigest()
+
+def get_cache_paths(cache_dir, cache_key):
+    """Gets the file paths for cached ideal CV and embedding."""
+    cache_subdir = Path(cache_dir) / cache_key[:2] # Use first 2 chars for subdir
+    ideal_cv_path = cache_subdir / f"{cache_key}_ideal_cv.md"
+    embedding_path = cache_subdir / f"{cache_key}_embedding.npy"
+    return ideal_cv_path, embedding_path
+
+def load_from_cache(cache_dir, cache_key):
+    """Loads ideal CV text and embedding from cache if available."""
+    ideal_cv_path, embedding_path = get_cache_paths(cache_dir, cache_key)
+    if ideal_cv_path.is_file() and embedding_path.is_file():
+        try:
+            print(f"Cache hit for key {cache_key[:8]}...")
+            ideal_cv_text = load_text(ideal_cv_path)
+            embedding = np.load(embedding_path)
+            if ideal_cv_text is not None and embedding is not None:
+                return ideal_cv_text, embedding
+        except Exception as e:
+            print(f"Error loading from cache for key {cache_key[:8]}: {e}")
+    return None, None # Cache miss or error
+
+def save_to_cache(cache_dir, cache_key, ideal_cv_text, ideal_cv_embedding):
+    """Saves ideal CV text and embedding to the cache."""
+    ideal_cv_path, embedding_path = get_cache_paths(cache_dir, cache_key)
+    try:
+        print(f"Saving to cache for key {cache_key[:8]}...")
+        # Ensure cache directory exists
+        ideal_cv_path.parent.mkdir(parents=True, exist_ok=True)
+        # Save ideal CV text
+        with open(ideal_cv_path, 'w', encoding='utf-8') as f:
+            f.write(ideal_cv_text)
+        # Save embedding
+        np.save(embedding_path, ideal_cv_embedding)
+        print(f"Successfully saved to cache: {ideal_cv_path.parent}")
+    except Exception as e:
+        print(f"Error saving to cache for key {cache_key[:8]}: {e}")
+
+
+# --- Core Functions ---
+
+def load_text(filepath):
+    """Loads text content from a file."""
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            return f.read()
+    except FileNotFoundError:
+        print(f"Error: File not found at {filepath}")
+        return None
+    except Exception as e:
+        print(f"Error reading file {filepath}: {e}")
+        return None
+
+def generate_ideal_cv(llm, job_description, system_prompt_text):
+    """Generates an 'Ideal CV' based on the job description using the LLM and loaded system prompt."""
+    print("Generating Ideal CV for JD...") # Add JD identifier if possible later
+    prompt_template = ChatPromptTemplate.from_messages(
+        [
+            ("system", system_prompt_text),
+            ("human", "Job Description:\n\n{job_description}"), # Keep human template simple for now
+        ]
+    )
+    chain = prompt_template | llm | StrOutputParser()
+    try:
+        ideal_cv = chain.invoke({"job_description": job_description})
+    except Exception as e:
+        print(f"Error during LLM call for Ideal CV generation: {e}")
+        return None
+    return ideal_cv
+
+def get_embedding(model, text):
+    """Generates embedding for the given text."""
+    print("Generating embedding...")
+    try:
+        embedding = model.encode(text)
+        # Reshape for cosine_similarity which expects 2D arrays
+        return embedding.reshape(1, -1)
+    except Exception as e:
+        print(f"Error during embedding generation: {e}")
+        return None
+
+def generate_explanation(llm, explanation_prompt_text, user_cv, ideal_cv):
+    """Generates an explanation for the match between user CV and ideal CV."""
+    print("Generating explanation...")
+    # Use a simple prompt template for explanation
+    prompt = PromptTemplate.from_template(explanation_prompt_text)
+    chain = prompt | llm | StrOutputParser()
+    try:
+        explanation = chain.invoke({"user_cv": user_cv, "ideal_cv": ideal_cv})
+        return explanation.strip()
+    except Exception as e:
+        print(f"Error during LLM call for explanation generation: {e}")
+        return "Explanation generation failed."
+
+
+def calculate_similarity(embedding1, embedding2):
+    """Calculates cosine similarity between two embeddings."""
+    # print("Calculating similarity...") # Less verbose
+    # Ensure both are 2D arrays
+    if embedding1.ndim == 1: embedding1 = embedding1.reshape(1, -1)
+    if embedding2.ndim == 1: embedding2 = embedding2.reshape(1, -1)
+    return cosine_similarity(embedding1, embedding2)[0][0]
+
+# --- Main Execution ---
+
+def main():
+    print("Starting Job Description Ranker...")
+    try:
+        # Load configuration first
+        config = load_config()
+        print("Configuration loaded.")
+
+        api_key = load_api_key()
+        llm, embedding_model = initialize_models(api_key, config)
+        print("Models initialized.")
+
+        # Load system prompt
+        system_prompt_path = config['prompts']['system_message_file']
+        print(f"Loading system prompt from: {system_prompt_path}")
+        system_prompt_text = load_text(system_prompt_path)
+        if not system_prompt_text:
+            print("Failed to load system prompt. Exiting.")
+        print("System prompt loaded.")
+
+        # Load explanation prompt
+        explanation_prompt_path = config['prompts']['explanation_prompt_file']
+        print(f"Loading explanation prompt from: {explanation_prompt_path}")
+        explanation_prompt_text = load_text(explanation_prompt_path)
+        if not explanation_prompt_text:
+            print("Failed to load explanation prompt. Explanations will be skipped.")
+            # Allow continuation without explanations if prompt fails to load
+            explanation_prompt_text = None # Set to None to indicate failure
+
+        cache_config = config['cache']
+        cache_enabled = cache_config['enabled']
+        cache_dir = Path(cache_config['directory']) if cache_enabled else None
+        if cache_enabled:
+            print(f"Caching enabled. Cache directory: {cache_dir}")
+
+
+        # 1. Load and embed the user's CV
+        cv_path = config['cv_path']
+        print(f"Loading user CV from: {cv_path}")
+        user_cv_text = load_text(cv_path)
+        if not user_cv_text:
+            print("Failed to load user CV. Exiting.")
+            return
+
+        print("Embedding user CV...")
+        user_cv_embedding = get_embedding(embedding_model, user_cv_text)
+        if user_cv_embedding is None:
+             print("Failed to embed user CV. Exiting.")
+             return
+        print("User CV embedded.")
+
+        # 2. Process Job Descriptions
+        results = []
+        jd_dir = config['jd_dir']
+        jd_files = glob.glob(os.path.join(jd_dir, "*.md"))
+        print(f"Found {len(jd_files)} job descriptions in {jd_dir}")
+
+        if not jd_files:
+            print(f"No job description files (.md) found in {jd_dir}. Exiting.")
+            return
+
+        for jd_path in jd_files:
+            jd_filename = os.path.basename(jd_path)
+            print(f"\nProcessing JD: {jd_filename}")
+
+            # Load JD
+            jd_text = load_text(jd_path)
+            if not jd_text:
+                print(f"Skipping {jd_filename} due to loading error.")
+                continue
+
+            ideal_cv_text = None
+            ideal_cv_embedding = None
+            cache_key = None
+
+            # --- Cache Check ---
+            if cache_enabled:
+                cache_key = get_cache_key(jd_path, jd_text, config, system_prompt_text)
+                ideal_cv_text, ideal_cv_embedding = load_from_cache(cache_dir, cache_key)
+
+            # --- Generation/Embedding (if not cached) ---
+            if ideal_cv_text is None or ideal_cv_embedding is None:
+                if cache_enabled: print(f"Cache miss for key {cache_key[:8]}...")
+
+                # Generate Ideal CV
+                ideal_cv_text = generate_ideal_cv(llm, jd_text, system_prompt_text)
+                if not ideal_cv_text:
+                     print(f"Failed to generate Ideal CV for {jd_filename}. Skipping.")
+                     continue
+                # print(f"--- Ideal CV for {jd_filename} ---\n{ideal_cv_text}\n-----------------------------") # Optional: print generated CV
+
+                # Embed Ideal CV
+                ideal_cv_embedding = get_embedding(embedding_model, ideal_cv_text)
+                if ideal_cv_embedding is None:
+                     print(f"Failed to embed Ideal CV for {jd_filename}. Skipping.")
+                     continue
+
+                # --- Save to Cache ---
+                if cache_enabled and cache_key:
+                    save_to_cache(cache_dir, cache_key, ideal_cv_text, ideal_cv_embedding)
+
+            # --- Calculate Similarity ---
+            similarity_score = calculate_similarity(user_cv_embedding, ideal_cv_embedding)
+            print(f"Similarity score for {jd_filename}: {similarity_score:.4f}")
+
+            # --- Generate Explanation ---
+            explanation = "Explanation skipped (prompt not loaded)."
+            if explanation_prompt_text and ideal_cv_text: # Only generate if prompt loaded and ideal CV exists
+                 explanation = generate_explanation(
+                     llm,
+                     explanation_prompt_text,
+                     user_cv_text, # Pass the original user CV text
+                     ideal_cv_text # Pass the generated ideal CV text
+                 )
+
+            results.append({
+                "jd": jd_filename,
+                "score": similarity_score,
+                "explanation": explanation
+            })
+
+        # 3. Rank and Print Results
+        if not results:
+            print("No job descriptions were successfully processed.")
+            return
+
+        print("\n--- Ranking Results ---")
+        results.sort(key=lambda x: x["score"], reverse=True)
+
+        for i, result in enumerate(results):
+            print(f"\n--- Rank {i+1} ---")
+            print(f"Job Description: {result['jd']}")
+            print(f"Similarity Score: {result['score']:.4f}")
+            print(f"Explanation:\n{result['explanation']}")
+            print("-" * 20)
+
+
+    except ValueError as ve:
+        print(f"Configuration Error: {ve}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+if __name__ == "__main__":
+    main()

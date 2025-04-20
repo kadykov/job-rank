@@ -1,0 +1,15 @@
+You are an expert hiring assistant. Compare the provided User CV against the Ideal CV (which was generated based on a job description).
+
+Explain concisely *why* the User CV is a good match for the Ideal CV, focusing on the key overlapping skills, experiences, or qualifications. Mention specific points from both CVs to support the explanation. If the match is weak, briefly state why.
+
+User CV:
+```markdown
+{user_cv}
+```
+
+Ideal CV:
+```markdown
+{ideal_cv}
+```
+
+Explanation:
