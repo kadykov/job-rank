@@ -1,8 +1,8 @@
 # Progress: Job Description Ranker
 
-**Date:** 2025-04-21 (Updated 2025-04-21 22:55 UTC)
+**Date:** 2025-04-22 (Updated 2025-04-22 13:16 UTC)
 
-**Current Status:** Explanation caching implemented, ideal CV prompt refined.
+**Current Status:** Developer tooling (`justfile`) refined, `mypy` issue fixed. Explanation caching previously implemented.
 
 **What Works:**
 - Project setup complete (Memory Bank, `.clinerules`, data files, `.gitignore`, dependencies).
@@ -28,9 +28,14 @@
     - `pytest` framework set up.
     - Unit tests for `load_config` function pass (updated for threshold).
     - Unit tests for ideal CV/embedding caching functions pass using mocks.
+- **Developer Tooling:**
+    - `justfile` provides comprehensive commands for running, testing, linting, formatting, and cache management.
+    - Placeholder `main.py` removed.
+- **Type Checking:**
+    - `mypy` runs successfully after fixing `sklearn` import issue.
 
 **What's Left to Build (Immediate Next Steps):**
-1.  **Memory Bank Update:** Update `systemPatterns.md` to reflect the new explanation caching logic and threshold.
+1.  **Memory Bank Update:** Update `systemPatterns.md` and `techContext.md` to reflect `justfile` changes and `main.py` removal. Update `.clinerules` with `just` usage notes.
 2.  **Refinement:**
     - Analyze the quality and usefulness of generated "Explanations" (for scores >= threshold).
     - Refine `prompts/explanation_prompt.txt` if necessary.
@@ -39,4 +44,3 @@
 
 **Known Issues:**
 - Requires `OPENAI_API_KEY` in `.env` to function fully.
-- `mypy` still reports missing stubs for `sklearn.metrics.pairwise` (minor type checking issue).

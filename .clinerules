@@ -8,3 +8,19 @@ This file captures project-specific patterns, preferences, and intelligence disc
 - **Data:** Starting with synthetic Markdown files in `data/cv` and `data/jd`.
 - **Dependencies:** Managed by `uv`.
 - **Core Logic:** Generate "Ideal CV" from JD, embed original CV and Ideal CV, compare with cosine similarity.
+
+## Development Workflow (2025-04-22)
+- **Task Runner:** Use `just` for common tasks. Run `just --list` to see available commands.
+    - `just install`: Install/sync dependencies.
+    - `just rank`: Run the main application.
+    - `just test`: Run tests.
+    - `just typecheck`: Run MyPy.
+    - `just lint`: Run Ruff checks.
+    - `just format`: Run Ruff format, import sort, and fixes.
+    - `just check`: Run tests, typecheck, and lint.
+    - `just format-check`: Run format and then all checks.
+    - `just clean-cache`: Remove all cache files.
+    - `just clean-explanations`: Remove only explanation cache files.
+    - `just cache-stats`: Show cache statistics.
+- **Entry Point:** The main script is `src/rank_jobs.py`. `main.py` has been removed.
+- **Type Hinting:** Use `# type: ignore[import-untyped]` for libraries without stubs (like `sklearn`).

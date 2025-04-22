@@ -10,10 +10,15 @@
 - **`scikit-learn`:** For calculating cosine similarity and potentially other ML utilities.
 - **`python-dotenv`:** For loading environment variables (like API keys) from a `.env` file.
 - **`markdown`:** Python library for parsing Markdown files (useful if preprocessing/cleaning is needed before embedding or sending to LLM).
+- **`just`:** Task runner for automating common development commands (defined in `justfile`).
+- **`pytest`:** Framework for running unit tests.
+- **`mypy`:** Static type checker for Python.
+- **`ruff`:** Linter and formatter for Python code.
 
 **2. Development Environment:**
 - **OS:** Linux (based on environment details).
 - **IDE:** VS Code with relevant extensions.
+- **Task Runner:** `just` (use `just --list` to see available commands).
 - **Containerization:** Running within a Dev Container (implied by `.devcontainer` files).
 - **Version Control:** Git (assumed, `.gitignore` exists).
 
@@ -25,10 +30,10 @@
 - **Embedding Model:** `all-MiniLM-L6-v2` (via `sentence-transformers`). This model is downloaded locally by the library on first use.
 
 **5. Setup & Installation:**
-- Ensure Python and `uv` are installed.
-- Create a virtual environment (managed by `uv`).
-- Install dependencies using `uv add langchain langchain-openai sentence-transformers scikit-learn python-dotenv markdown`.
+- Ensure Python, `uv`, and `just` are installed.
+- Create/sync the virtual environment and install all dependencies (including dev tools) using `just install` or `uv sync --all-groups`.
 - Create a `.env` file in the project root containing `OPENAI_API_KEY=your_actual_key`. Ensure `.env` is added to `.gitignore`.
+- Common development tasks (test, lint, format, typecheck, run) are executed via `just` commands (see `justfile`).
 
 **6. Technical Constraints & Considerations:**
 - **API Costs:** Calls to the OpenAI API incur costs. `gpt-4o-mini` is relatively cost-effective, but usage should be monitored.

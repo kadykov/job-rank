@@ -1,9 +1,9 @@
 # System Patterns: Job Description Ranker
 
-**Date:** 2025-04-21 (Updated 2025-04-21 22:56 UTC)
+**Date:** 2025-04-22 (Updated 2025-04-22 13:17 UTC)
 
 **1. Overall Architecture:**
-Command-Line Application (Python Script) using a `src` layout.
+Command-Line Application (Python Script: `src/rank_jobs.py`) using a `src` layout. Tasks (running, testing, linting, formatting, cache management) are managed via `justfile`.
 
 **Workflow:**
 1.  **Configuration Loading:** Load settings (paths, models, prompts, cache config) from `config.yaml`.
@@ -44,6 +44,7 @@ Command-Line Application (Python Script) using a `src` layout.
 - **Language:** Python 3.x
 - **Project Structure:** `src` layout.
 - **Dependency Management:** `uv`.
+- **Task Runner:** `just` (`justfile` defines recipes for common tasks).
 - **Configuration:** Managed via `config.yaml` (loaded using `PyYAML`). Includes paths, models, prompts, cache settings, and `explanation_threshold`. API keys still loaded from `.env`.
 - **LLM Interaction:** `LangChain` framework (`ChatOpenAI`, `ChatPromptTemplate`, `PromptTemplate`, `StrOutputParser`). Model configurable via `config.yaml`. System prompt refined to exclude placeholders.
 - **Text Embeddings:** `sentence-transformers` library. Model configurable via `config.yaml`.
@@ -57,6 +58,8 @@ Command-Line Application (Python Script) using a `src` layout.
     - Cache stored in subdirectories based on the first 2 chars of the hash key.
     - Enabled/disabled, directory, and `explanation_threshold` configured via `config.yaml`.
 - **Explainability:** LLM-generated explanation comparing user CV and ideal CV. **Generated and cached only if similarity score meets `explanation_threshold`.**
+- **Type Checking:** `mypy` (configured in `justfile`).
+- **Linting/Formatting:** `ruff` (configured in `justfile`).
 
 **3. Core Components (within `src/rank_jobs.py`):**
 - **`load_config`:** Loads and validates `config.yaml` (including `explanation_threshold`).
@@ -69,9 +72,9 @@ Command-Line Application (Python Script) using a `src` layout.
 - **`get_embedding`:** Generates text embeddings.
 - **`generate_explanation`:** Generates match explanation using LLM and explanation prompt.
 - **`calculate_similarity`:** Calculates cosine similarity.
-- **`main`:** Orchestrates the overall workflow, including loading prompts, handling caching (ideal CVs/embeddings and explanations), conditional explanation generation based on threshold, processing JDs, and printing results.
+- **`main` (within `src/rank_jobs.py`):** Orchestrates the overall workflow, including loading prompts, handling caching (ideal CVs/embeddings and explanations), conditional explanation generation based on threshold, processing JDs, and printing results. This script is the primary entry point, typically run via `just rank`.
 
-**4. Data Flow:**
+**4. Data Flow (Execution via `just rank` or `python src/rank_jobs.py`):**
 ```mermaid
 graph TD
     subgraph Input
