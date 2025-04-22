@@ -22,3 +22,5 @@ prompts:
 cache:
   enabled: true
   directory: "cache" # Directory to store cached ideal CVs and embeddings
+  # Only generate/cache explanations if similarity score >= this value
+  explanation_threshold: 0.6

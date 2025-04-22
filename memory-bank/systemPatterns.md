@@ -1,6 +1,6 @@
 # System Patterns: Job Description Ranker
 
-**Date:** 2025-04-20
+**Date:** 2025-04-21 (Updated 2025-04-21 22:56 UTC)
 
 **1. Overall Architecture:**
 Command-Line Application (Python Script) using a `src` layout.
@@ -25,10 +25,18 @@ Command-Line Application (Python Script) using a `src` layout.
         - Generate the embedding vector for the "Ideal CV" (model specified in `config.yaml`).
         - **Save to Cache (if enabled):** Store the generated "Ideal CV" text (`.md`) and embedding (`.npy`) in the cache directory using the generated cache key.
     d.  **Similarity Calculation:** Compute the cosine similarity between the user's CV embedding and the (cached or newly generated) "Ideal CV" embedding using `scikit-learn`.
-    e.  **Explanation Generation:**
-        - Construct the prompt using the loaded explanation prompt, the user's CV text, and the (cached or newly generated) "Ideal CV" text.
-        - Send the prompt to the LLM to generate an explanation of the match.
-    f.  **Storage:** Store the JD identifier, similarity score, and explanation.
+    e.  **Conditional Explanation Generation & Caching:**
+        - Check if `similarity_score >= explanation_threshold` (from `config.yaml`).
+        - **If Yes:**
+            - Generate explanation cache key (based on ideal CV cache key, user CV text, explanation prompt, LLM config).
+            - Attempt to load explanation text from cache (`_explanation.txt`).
+            - **If Cache Miss:**
+                - Construct the prompt using the loaded explanation prompt, user CV text, and ideal CV text.
+                - Send the prompt to the LLM to generate an explanation.
+                - **Save to Cache (if enabled & successful):** Store the generated explanation text in the cache directory using the explanation cache key.
+            - Store the loaded/generated explanation.
+        - **If No:** Store a "skipped" message indicating the score was below the threshold.
+    f.  **Storage:** Store the JD identifier, similarity score, and the explanation (or skipped message).
 5.  **Ranking:** Sort the stored results by similarity score in descending order.
 6.  **Output:** Print the ranked list to the console, including the JD identifier, score, and explanation for each entry.
 
@@ -36,29 +44,32 @@ Command-Line Application (Python Script) using a `src` layout.
 - **Language:** Python 3.x
 - **Project Structure:** `src` layout.
 - **Dependency Management:** `uv`.
-- **Configuration:** Managed via `config.yaml` (loaded using `PyYAML`). API keys still loaded from `.env`.
-- **LLM Interaction:** `LangChain` framework (`ChatOpenAI`, `ChatPromptTemplate`, `PromptTemplate`, `StrOutputParser`). Model configurable via `config.yaml`.
+- **Configuration:** Managed via `config.yaml` (loaded using `PyYAML`). Includes paths, models, prompts, cache settings, and `explanation_threshold`. API keys still loaded from `.env`.
+- **LLM Interaction:** `LangChain` framework (`ChatOpenAI`, `ChatPromptTemplate`, `PromptTemplate`, `StrOutputParser`). Model configurable via `config.yaml`. System prompt refined to exclude placeholders.
 - **Text Embeddings:** `sentence-transformers` library. Model configurable via `config.yaml`.
 - **Vector Similarity:** `scikit-learn` (`cosine_similarity`).
 - **Data Format:** Markdown (`.md`) for CV and JDs.
 - **Caching:**
     - File-based caching for ideal CVs (`.md`) and embeddings (`.npy`).
-    - SHA256 hash of JD path, content, and relevant config used as cache key.
+    - Ideal CV cache key based on JD path, content, system prompt, LLM/embedding models.
+    - **File-based caching for explanations (`.txt`).**
+    - **Explanation cache key based on ideal CV key, user CV text, explanation prompt, LLM config.**
     - Cache stored in subdirectories based on the first 2 chars of the hash key.
-    - Enabled/disabled and directory configured via `config.yaml`.
-- **Explainability:** LLM-generated explanation comparing user CV and ideal CV.
+    - Enabled/disabled, directory, and `explanation_threshold` configured via `config.yaml`.
+- **Explainability:** LLM-generated explanation comparing user CV and ideal CV. **Generated and cached only if similarity score meets `explanation_threshold`.**
 
 **3. Core Components (within `src/rank_jobs.py`):**
-- **`load_config`:** Loads and validates `config.yaml`.
+- **`load_config`:** Loads and validates `config.yaml` (including `explanation_threshold`).
 - **`load_api_key`:** Loads API key from `.env`.
 - **`initialize_models`:** Initializes LLM and embedding models based on config.
-- **Caching Functions (`get_cache_key`, `get_cache_paths`, `load_from_cache`, `save_to_cache`):** Manage cache operations.
-- **`load_text`:** Loads text from files (used for CV, JDs, prompts, cached CVs).
-- **`generate_ideal_cv`:** Generates ideal CV using LLM and system prompt.
+- **Ideal CV Caching Functions (`get_cache_key`, `get_cache_paths`, `load_from_cache`, `save_to_cache`):** Manage ideal CV/embedding cache operations.
+- **Explanation Caching Functions (`get_explanation_cache_key`, `get_explanation_cache_path`, `load_explanation_from_cache`, `save_explanation_to_cache`):** Manage explanation cache operations.
+- **`load_text`:** Loads text from files (used for CV, JDs, prompts, cached CVs/explanations).
+- **`generate_ideal_cv`:** Generates ideal CV using LLM and refined system prompt.
 - **`get_embedding`:** Generates text embeddings.
 - **`generate_explanation`:** Generates match explanation using LLM and explanation prompt.
 - **`calculate_similarity`:** Calculates cosine similarity.
-- **`main`:** Orchestrates the overall workflow, including loading prompts, handling caching, processing JDs, and printing results.
+- **`main`:** Orchestrates the overall workflow, including loading prompts, handling caching (ideal CVs/embeddings and explanations), conditional explanation generation based on threshold, processing JDs, and printing results.
 
 **4. Data Flow:**
 ```mermaid
@@ -100,11 +111,25 @@ graph TD
         JoinCache --> CalcSim[Calculate Similarity]
         EmbedUserCV --> CalcSim
 
-        JoinCache --> GenExplain[Generate Explanation (LLM)]
-        UserCV -- Text --> GenExplain
+        CalcSim --> CheckThreshold{Score >= Threshold?}
 
-        CalcSim --> StoreResult[Store JD, Score, Explanation]
-        GenExplain --> StoreResult
+        CheckThreshold -- Yes --> GenExpCacheKey[Generate Explanation Cache Key]
+        UserCV -- Text --> GenExpCacheKey
+        JoinCache -- Ideal CV Key --> GenExpCacheKey
+        ExpPrompt -- Text --> GenExpCacheKey
+        Config -- LLM Settings --> GenExpCacheKey
+
+        GenExpCacheKey --> ExpCacheCheck{Explanation Cache Hit?}
+        ExpCacheCheck -- Yes --> LoadExpCache[Load Explanation from Cache (.txt)]
+        ExpCacheCheck -- No --> GenExplainLLM[Generate Explanation (LLM)]
+        GenExplainLLM --> SaveExpCache[Save Explanation to Cache (.txt)]
+        SaveExpCache --> JoinExp[Join Explanation]
+        LoadExpCache --> JoinExp
+
+        CheckThreshold -- No --> SkipExp[Explanation = Skipped Message]
+        SkipExp --> JoinExp
+
+        JoinExp --> StoreResult[Store JD, Score, Explanation]
         StoreResult --> LoopJDs
     end
 

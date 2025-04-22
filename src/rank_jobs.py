@@ -36,8 +36,11 @@ def load_config(config_path="config.yaml"):
         # Check for both prompt files now
         if not all(k in config['prompts'] for k in ['system_message_file', 'explanation_prompt_file']):
              raise ValueError("Config file is missing required 'prompts' keys: ['system_message_file', 'explanation_prompt_file']")
-        if not all(k in config['cache'] for k in ['enabled', 'directory']):
-             raise ValueError("Config file is missing required 'cache' keys: ['enabled', 'directory']")
+        if not all(k in config['cache'] for k in ['enabled', 'directory', 'explanation_threshold']):
+            raise ValueError("Config file is missing required 'cache' keys: ['enabled', 'directory', 'explanation_threshold']")
+        # Validate threshold type
+        if not isinstance(config['cache']['explanation_threshold'], (int, float)):
+            raise ValueError("'explanation_threshold' in config must be a number.")
         return config
     except yaml.YAMLError as e:
         raise ValueError(f"Error parsing YAML configuration file: {e}")
@@ -114,6 +117,52 @@ def save_to_cache(cache_dir, cache_key, ideal_cv_text, ideal_cv_embedding):
         print(f"Successfully saved to cache: {ideal_cv_path.parent}")
     except Exception as e:
         print(f"Error saving to cache for key {cache_key[:8]}: {e}")
+
+# --- Explanation Caching Functions ---
+
+def get_explanation_cache_key(ideal_cv_cache_key, user_cv_text, explanation_prompt_text, config):
+    """Generates a unique cache key for the explanation."""
+    hasher = hashlib.sha256()
+    # Base key depends on the ideal CV (which depends on JD, system prompt, models)
+    hasher.update(ideal_cv_cache_key.encode('utf-8'))
+    # Also depends on the specific user CV
+    hasher.update(user_cv_text.encode('utf-8'))
+    # And the explanation prompt used
+    hasher.update(explanation_prompt_text.encode('utf-8'))
+    # And the LLM model used for explanation (same as ideal CV for now)
+    hasher.update(config['llm']['model_name'].encode('utf-8'))
+    hasher.update(str(config['llm']['temperature']).encode('utf-8'))
+    return hasher.hexdigest()
+
+def get_explanation_cache_path(cache_dir, explanation_cache_key):
+    """Gets the file path for a cached explanation."""
+    cache_subdir = Path(cache_dir) / explanation_cache_key[:2]
+    return cache_subdir / f"{explanation_cache_key}_explanation.txt"
+
+def load_explanation_from_cache(cache_dir, explanation_cache_key):
+    """Loads explanation text from cache if available."""
+    explanation_path = get_explanation_cache_path(cache_dir, explanation_cache_key)
+    if explanation_path.is_file():
+        try:
+            print(f"Explanation cache hit for key {explanation_cache_key[:8]}...")
+            explanation_text = load_text(explanation_path)
+            if explanation_text is not None:
+                return explanation_text
+        except Exception as e:
+            print(f"Error loading explanation from cache for key {explanation_cache_key[:8]}: {e}")
+    return None # Cache miss or error
+
+def save_explanation_to_cache(cache_dir, explanation_cache_key, explanation_text):
+    """Saves explanation text to the cache."""
+    explanation_path = get_explanation_cache_path(cache_dir, explanation_cache_key)
+    try:
+        print(f"Saving explanation to cache for key {explanation_cache_key[:8]}...")
+        explanation_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(explanation_path, 'w', encoding='utf-8') as f:
+            f.write(explanation_text)
+        print(f"Successfully saved explanation to cache: {explanation_path.parent}")
+    except Exception as e:
+        print(f"Error saving explanation to cache for key {explanation_cache_key[:8]}: {e}")
 
 
 # --- Core Functions ---
@@ -286,15 +335,38 @@ def main():
             similarity_score = calculate_similarity(user_cv_embedding, ideal_cv_embedding)
             print(f"Similarity score for {jd_filename}: {similarity_score:.4f}")
 
-            # --- Generate Explanation ---
-            explanation = "Explanation skipped (prompt not loaded)."
-            if explanation_prompt_text and ideal_cv_text: # Only generate if prompt loaded and ideal CV exists
-                 explanation = generate_explanation(
-                     llm,
-                     explanation_prompt_text,
-                     user_cv_text, # Pass the original user CV text
-                     ideal_cv_text # Pass the generated ideal CV text
-                 )
+            # --- Generate/Cache Explanation (Conditional) ---
+            explanation = None # Default to None
+            explanation_threshold = config['cache']['explanation_threshold']
+
+            if not explanation_prompt_text:
+                explanation = "Explanation skipped (prompt not loaded)."
+            elif not ideal_cv_text:
+                 explanation = "Explanation skipped (ideal CV generation failed)."
+            elif similarity_score >= explanation_threshold:
+                # Only proceed if score is above threshold
+                explanation_cache_key = None
+                if cache_enabled and cache_key: # Need ideal_cv cache key
+                    explanation_cache_key = get_explanation_cache_key(
+                        cache_key, user_cv_text, explanation_prompt_text, config
+                    )
+                    explanation = load_explanation_from_cache(cache_dir, explanation_cache_key)
+
+                if explanation is None: # Cache miss or caching disabled
+                    if cache_enabled: print(f"Explanation cache miss for key {explanation_cache_key[:8]}...")
+                    explanation = generate_explanation(
+                        llm,
+                        explanation_prompt_text,
+                        user_cv_text,
+                        ideal_cv_text
+                    )
+                    # Save to cache if generated successfully and caching enabled
+                    if explanation != "Explanation generation failed." and cache_enabled and explanation_cache_key:
+                        save_explanation_to_cache(cache_dir, explanation_cache_key, explanation)
+            else:
+                # Score is below threshold
+                explanation = f"Explanation skipped (score {similarity_score:.4f} < threshold {explanation_threshold})."
+
 
             results.append({
                 "jd": jd_filename,

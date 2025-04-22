@@ -10,7 +10,12 @@ from rank_jobs import (
     get_cache_paths,
     load_from_cache,
     save_to_cache,
-    load_text # Helper needed for load_from_cache mock
+    load_text, # Helper needed for load_from_cache mock
+    # New functions for explanation caching
+    get_explanation_cache_key,
+    get_explanation_cache_path,
+    load_explanation_from_cache,
+    save_explanation_to_cache
 )
 # Need to patch functions within the correct module path now
 MODULE_PATH = "rank_jobs"
@@ -39,6 +44,25 @@ EXPECTED_EMBEDDING_PATH = EXPECTED_CACHE_SUBDIR / f"{EXPECTED_CACHE_KEY}_embeddi
 
 MOCK_IDEAL_CV_TEXT = "Generated ideal CV."
 MOCK_EMBEDDING = np.array([[0.1, 0.2, 0.3]])
+
+# --- Test Data for Explanation Caching ---
+MOCK_USER_CV_TEXT = "This is the user's CV."
+MOCK_EXPLANATION_PROMPT_TEXT = "Explain the match."
+MOCK_EXPLANATION_TEXT = "This is the explanation."
+# Use existing MOCK_CONFIG and EXPECTED_CACHE_KEY (as ideal_cv_cache_key)
+EXPECTED_EXPLANATION_HASH_INPUT = (
+    EXPECTED_CACHE_KEY +
+    MOCK_USER_CV_TEXT +
+    MOCK_EXPLANATION_PROMPT_TEXT +
+    MOCK_CONFIG['llm']['model_name'] + # type: ignore[index]
+    str(MOCK_CONFIG['llm']['temperature']) # type: ignore[index]
+)
+EXPECTED_EXPLANATION_CACHE_KEY = hashlib.sha256(EXPECTED_EXPLANATION_HASH_INPUT.encode('utf-8')).hexdigest()
+EXPECTED_EXPLANATION_CACHE_PATH = (
+    Path('dummy_cache') /
+    EXPECTED_EXPLANATION_CACHE_KEY[:2] /
+    f"{EXPECTED_EXPLANATION_CACHE_KEY}_explanation.txt"
+)
 
 # --- Tests for get_cache_key ---
 
@@ -188,4 +212,155 @@ def test_save_to_cache_write_error(mock_open_file, mock_mkdir):
 
     mock_mkdir.assert_called_once()
     mock_open_file.assert_called_once_with(EXPECTED_IDEAL_CV_PATH, 'w', encoding='utf-8')
+    mock_file_handle.write.assert_called_once() # Should attempt to write
+
+
+# =========================================
+# == Tests for Explanation Caching Funcs ==
+# =========================================
+
+# --- Tests for get_explanation_cache_key ---
+
+def test_get_explanation_cache_key_consistency():
+    """Tests explanation cache key consistency."""
+    key1 = get_explanation_cache_key(
+        EXPECTED_CACHE_KEY, MOCK_USER_CV_TEXT, MOCK_EXPLANATION_PROMPT_TEXT, MOCK_CONFIG
+    )
+    key2 = get_explanation_cache_key(
+        EXPECTED_CACHE_KEY, MOCK_USER_CV_TEXT, MOCK_EXPLANATION_PROMPT_TEXT, MOCK_CONFIG
+    )
+    assert key1 == key2
+    assert key1 == EXPECTED_EXPLANATION_CACHE_KEY
+
+def test_get_explanation_cache_key_sensitivity():
+    """Tests explanation cache key sensitivity to inputs."""
+    key_base = get_explanation_cache_key(
+        EXPECTED_CACHE_KEY, MOCK_USER_CV_TEXT, MOCK_EXPLANATION_PROMPT_TEXT, MOCK_CONFIG
+    )
+
+    # Change ideal CV key
+    key_diff_ideal = get_explanation_cache_key(
+        "different_ideal_key", MOCK_USER_CV_TEXT, MOCK_EXPLANATION_PROMPT_TEXT, MOCK_CONFIG
+    )
+    assert key_base != key_diff_ideal
+
+    # Change user CV text
+    key_diff_user_cv = get_explanation_cache_key(
+        EXPECTED_CACHE_KEY, "Different user CV.", MOCK_EXPLANATION_PROMPT_TEXT, MOCK_CONFIG
+    )
+    assert key_base != key_diff_user_cv
+
+    # Change explanation prompt
+    key_diff_exp_prompt = get_explanation_cache_key(
+        EXPECTED_CACHE_KEY, MOCK_USER_CV_TEXT, "Different explanation prompt.", MOCK_CONFIG
+    )
+    assert key_base != key_diff_exp_prompt
+
+    # Change LLM model in config
+    config_diff_llm = MOCK_CONFIG.copy()
+    config_diff_llm['llm'] = {'model_name': 'other-llm-exp', 'temperature': 0.5}
+    key_diff_llm = get_explanation_cache_key(
+        EXPECTED_CACHE_KEY, MOCK_USER_CV_TEXT, MOCK_EXPLANATION_PROMPT_TEXT, config_diff_llm
+    )
+    assert key_base != key_diff_llm
+
+# --- Tests for get_explanation_cache_path ---
+
+def test_get_explanation_cache_path():
+    """Tests the generation of the explanation cache file path."""
+    cache_dir = Path("test_cache_dir_exp")
+    exp_path = get_explanation_cache_path(cache_dir, EXPECTED_EXPLANATION_CACHE_KEY)
+    expected_subdir = cache_dir / EXPECTED_EXPLANATION_CACHE_KEY[:2]
+    assert exp_path == expected_subdir / f"{EXPECTED_EXPLANATION_CACHE_KEY}_explanation.txt"
+
+# --- Tests for load_explanation_from_cache ---
+
+@patch(f'{MODULE_PATH}.Path.is_file')
+@patch(f'{MODULE_PATH}.load_text')
+def test_load_explanation_from_cache_hit(mock_load_text, mock_is_file):
+    """Tests loading explanation successfully from cache."""
+    mock_is_file.return_value = True
+    mock_load_text.return_value = MOCK_EXPLANATION_TEXT
+    cache_dir = Path("dummy_cache") # Use a consistent dummy path
+
+    explanation = load_explanation_from_cache(cache_dir, EXPECTED_EXPLANATION_CACHE_KEY)
+
+    assert explanation == MOCK_EXPLANATION_TEXT
+    mock_is_file.assert_called_once()
+    # Construct the expected path based on the dummy cache dir used in the call
+    expected_path = cache_dir / EXPECTED_EXPLANATION_CACHE_KEY[:2] / f"{EXPECTED_EXPLANATION_CACHE_KEY}_explanation.txt"
+    mock_load_text.assert_called_once_with(expected_path)
+
+
+@patch(f'{MODULE_PATH}.Path.is_file')
+def test_load_explanation_from_cache_miss(mock_is_file):
+    """Tests explanation cache miss when file doesn't exist."""
+    mock_is_file.return_value = False
+    cache_dir = Path("dummy_cache")
+
+    explanation = load_explanation_from_cache(cache_dir, EXPECTED_EXPLANATION_CACHE_KEY)
+
+    assert explanation is None
+    mock_is_file.assert_called_once()
+
+
+@patch(f'{MODULE_PATH}.Path.is_file')
+@patch(f'{MODULE_PATH}.load_text', side_effect=Exception("Read error"))
+def test_load_explanation_from_cache_read_error(mock_load_text, mock_is_file):
+    """Tests explanation cache miss due to read error."""
+    mock_is_file.return_value = True
+    cache_dir = Path("dummy_cache")
+
+    explanation = load_explanation_from_cache(cache_dir, EXPECTED_EXPLANATION_CACHE_KEY)
+
+    assert explanation is None
+    mock_is_file.assert_called_once()
+    mock_load_text.assert_called_once() # Should attempt to load
+
+# --- Tests for save_explanation_to_cache ---
+
+@patch(f'{MODULE_PATH}.Path.mkdir')
+@patch('builtins.open', new_callable=mock_open)
+def test_save_explanation_to_cache_success(mock_open_file, mock_mkdir):
+    """Tests saving explanation successfully."""
+    cache_dir = Path("dummy_cache_exp")
+    # Construct the expected path based on the dummy cache dir used in the call
+    expected_path = cache_dir / EXPECTED_EXPLANATION_CACHE_KEY[:2] / f"{EXPECTED_EXPLANATION_CACHE_KEY}_explanation.txt"
+
+
+    save_explanation_to_cache(cache_dir, EXPECTED_EXPLANATION_CACHE_KEY, MOCK_EXPLANATION_TEXT)
+
+    mock_mkdir.assert_called_once_with(parents=True, exist_ok=True)
+    mock_open_file.assert_called_once_with(expected_path, 'w', encoding='utf-8')
+    mock_open_file().write.assert_called_once_with(MOCK_EXPLANATION_TEXT)
+
+
+@patch(f'{MODULE_PATH}.Path.mkdir', side_effect=Exception("Disk full"))
+def test_save_explanation_to_cache_mkdir_error(mock_mkdir):
+    """Tests error during explanation cache directory creation."""
+    cache_dir = Path("dummy_cache_exp")
+    try:
+        save_explanation_to_cache(cache_dir, EXPECTED_EXPLANATION_CACHE_KEY, MOCK_EXPLANATION_TEXT)
+    except Exception as e:
+        pytest.fail(f"save_explanation_to_cache raised an unexpected exception: {e}")
+    mock_mkdir.assert_called_once()
+
+
+@patch(f'{MODULE_PATH}.Path.mkdir')
+@patch('builtins.open', new_callable=mock_open)
+def test_save_explanation_to_cache_write_error(mock_open_file, mock_mkdir):
+    """Tests error during explanation file writing."""
+    mock_file_handle = mock_open_file.return_value.__enter__.return_value
+    mock_file_handle.write.side_effect = Exception("Write error")
+    cache_dir = Path("dummy_cache_exp")
+    # Construct the expected path based on the dummy cache dir used in the call
+    expected_path = cache_dir / EXPECTED_EXPLANATION_CACHE_KEY[:2] / f"{EXPECTED_EXPLANATION_CACHE_KEY}_explanation.txt"
+
+    try:
+        save_explanation_to_cache(cache_dir, EXPECTED_EXPLANATION_CACHE_KEY, MOCK_EXPLANATION_TEXT)
+    except Exception as e:
+        pytest.fail(f"save_explanation_to_cache raised an unexpected exception: {e}")
+
+    mock_mkdir.assert_called_once()
+    mock_open_file.assert_called_once_with(expected_path, 'w', encoding='utf-8')
     mock_file_handle.write.assert_called_once() # Should attempt to write

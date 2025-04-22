@@ -18,9 +18,11 @@ embedding:
   model_name: "test-embedding-model"
 prompts:
   system_message_file: "prompts/test_system.txt"
+  explanation_prompt_file: "prompts/test_explanation.txt" # Added
 cache:
   enabled: true
   directory: "test_cache"
+  explanation_threshold: 0.5 # Added
 """
     p = tmp_path / "config_valid.yaml"
     p.write_text(content)

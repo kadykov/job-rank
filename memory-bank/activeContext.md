@@ -1,40 +1,24 @@
-# Active Context: Job Description Ranker - Feature Implementation
+# Active Context: Job Description Ranker - Refinement & Explanation Caching
 
-**Date:** 2025-04-20 (Updated 2025-04-20 11:05 UTC)
+**Date:** 2025-04-21 (Updated 2025-04-21 22:54 UTC)
 
-**Current Focus:** Feature implementation complete. Ready for end-to-end testing and review.
+**Current Focus:** Implementing explanation caching and refining prompts.
 
 **Recent Changes:**
-- **Project Structure:** Moved main script to `src/rank_jobs.py` and configured `pyproject.toml` for `src` layout. Installed project in editable mode (`uv pip install -e .`).
-- **Configurability:**
-    - Created `config.yaml` to manage paths, model names, temperature, prompt files, and cache settings.
-    - Updated `src/rank_jobs.py` to load and use settings from `config.yaml`.
-- **Prompt Externalization:**
-    - Moved LLM system prompt for ideal CV generation to `prompts/system_message.txt`.
-    - Created `prompts/explanation_prompt.txt` for match explanation.
-    - Updated `src/rank_jobs.py` to load prompts from files specified in `config.yaml`.
-- **Caching:**
-    - Implemented file-based caching for generated ideal CVs (as `.md`) and their embeddings (as `.npy`).
-    - Cache keys are generated based on JD content and relevant configuration (LLM model, embedding model, system prompt) using SHA256.
-    - Cache files are stored in subdirectories based on the first two characters of the hash key (e.g., `cache/ab/abcdef..._ideal_cv.md`).
-    - Added cache configuration (`enabled`, `directory`) to `config.yaml`.
-    - Updated `src/rank_jobs.py` with functions (`get_cache_key`, `get_cache_paths`, `load_from_cache`, `save_to_cache`) and integrated logic into the main processing loop.
-- **Testing:**
-    - Added `pytest` and necessary type stubs (`data-science-types`, `types-PyYAML`) as dev dependencies.
-    - Created `tests/` directory.
-    - Implemented unit tests for `load_config` in `tests/test_config.py`.
-    - Implemented unit tests for caching functions in `tests/test_cache.py` using mocking.
-- **Explainability:**
-    - Added `generate_explanation` function to `src/rank_jobs.py` using the LLM and the new explanation prompt.
-    - Integrated explanation generation into the main loop.
-    - Updated the final output format to include the generated explanation for each ranked job.
+- **Ideal CV Prompt Refinement:** Updated `prompts/system_message.txt` to explicitly instruct the LLM to exclude placeholder personal details and generic CV sections, focusing solely on extracting requirements from the JD. Tested and confirmed improved output quality.
+- **Explanation Threshold:** Added `explanation_threshold` setting to `config.yaml` (default 0.6) to control when explanations are generated/cached. Updated `load_config` in `src/rank_jobs.py` to validate this setting.
+- **Explanation Caching:**
+    - Added new caching functions (`get_explanation_cache_key`, `get_explanation_cache_path`, `load_explanation_from_cache`, `save_explanation_to_cache`) to `src/rank_jobs.py`.
+    - The explanation cache key depends on the ideal CV's cache key, the user CV text, the explanation prompt text, and relevant LLM config.
+    - Modified the main loop in `src/rank_jobs.py` to check the similarity score against the `explanation_threshold`.
+    - Explanations are now loaded from/saved to cache only if the score meets the threshold. If below threshold, a "skipped" message is stored.
 
 **Next Steps:**
-1.  Run the script end-to-end (`python src/rank_jobs.py`) to test the integrated features (requires `OPENAI_API_KEY` in `.env`).
-2.  Review the output, including the generated explanations.
-3.  Update `progress.md` and `systemPatterns.md` to reflect the new architecture and features.
-4.  Consider adding more comprehensive tests (e.g., integration tests mocking external APIs).
+1.  Update `progress.md` and `systemPatterns.md` to reflect the new explanation caching logic and threshold.
+2.  Review the quality of the generated explanations (if score >= threshold) and refine `prompts/explanation_prompt.txt` if necessary.
+3.  Consider adding unit tests for the new explanation caching functions.
+4.  Discuss and prioritize next features (e.g., multi-lingual CV support, CLI/API compatibility).
 
 **Open Questions/Decisions:**
-- Does the user have a valid `OPENAI_API_KEY` in the `.env` file? (Still required for full run).
-- Is the quality of the generated explanations acceptable?
+- Is the default `explanation_threshold` of 0.6 appropriate? (Can be adjusted in `config.yaml`).
+- Is the quality of the generated explanations acceptable? (Needs review).
