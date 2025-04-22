@@ -1,9 +1,9 @@
 import pytest
-import yaml
-from pathlib import Path
-from rank_jobs import load_config # Import the module directly
+
+from rank_jobs import load_config  # Import the module directly
 
 # --- Fixtures ---
+
 
 @pytest.fixture
 def valid_config_path(tmp_path):
@@ -28,6 +28,7 @@ cache:
     p.write_text(content)
     return p
 
+
 @pytest.fixture
 def invalid_yaml_path(tmp_path):
     """Creates an invalid temporary YAML file."""
@@ -35,6 +36,7 @@ def invalid_yaml_path(tmp_path):
     p = tmp_path / "config_invalid_yaml.yaml"
     p.write_text(content)
     return p
+
 
 @pytest.fixture
 def missing_keys_config_path(tmp_path):
@@ -57,25 +59,30 @@ cache:
     p.write_text(content)
     return p
 
+
 # --- Tests ---
+
 
 def test_load_config_valid(valid_config_path):
     """Tests loading a valid configuration file."""
     config = load_config(valid_config_path)
-    assert config['cv_path'] == "data/cv/test_cv.md"
-    assert config['llm']['model_name'] == "test-llm-model"
-    assert config['cache']['enabled'] is True
-    assert config['cache']['directory'] == "test_cache"
+    assert config["cv_path"] == "data/cv/test_cv.md"
+    assert config["llm"]["model_name"] == "test-llm-model"
+    assert config["cache"]["enabled"] is True
+    assert config["cache"]["directory"] == "test_cache"
+
 
 def test_load_config_not_found():
     """Tests loading a non-existent configuration file."""
     with pytest.raises(FileNotFoundError):
         load_config("non_existent_config.yaml")
 
+
 def test_load_config_invalid_yaml(invalid_yaml_path):
     """Tests loading an invalid YAML file."""
     with pytest.raises(ValueError, match="Error parsing YAML"):
         load_config(invalid_yaml_path)
+
 
 def test_load_config_missing_keys(missing_keys_config_path):
     """Tests loading a config file with missing required keys."""
