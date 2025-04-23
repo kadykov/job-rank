@@ -1,9 +1,9 @@
 # System Patterns: Job Description Ranker
 
-**Date:** 2025-04-22 (Updated 2025-04-22 13:17 UTC)
+**Date:** 2025-04-23 (Updated 2025-04-23 09:50 UTC)
 
 **1. Overall Architecture:**
-Command-Line Application (Python Script: `src/rank_jobs.py`) using a `src` layout. Tasks (running, testing, linting, formatting, cache management) are managed via `justfile`.
+Command-Line Application (Python Script: `rank_jobs.py` within the installable `job-rank` package) using a `src` layout. Tasks (running, testing, linting, formatting, cache management) are managed via `justfile`. The core logic is separated into a pipeline function for better modularity and testability.
 
 **Workflow:**
 1.  **Configuration Loading:** Load settings (paths, models, prompts, cache config) from `config.yaml`.
@@ -72,13 +72,22 @@ Command-Line Application (Python Script: `src/rank_jobs.py`) using a `src` layou
 - **`get_embedding`:** Generates text embeddings.
 - **`generate_explanation`:** Generates match explanation using LLM and explanation prompt.
 - **`calculate_similarity`:** Calculates cosine similarity.
-- **`main` (within `src/rank_jobs.py`):** Orchestrates the overall workflow, including loading prompts, handling caching (ideal CVs/embeddings and explanations), conditional explanation generation based on threshold, processing JDs, and printing results. This script is the primary entry point, typically run via `just rank`.
+- **`run_ranking_pipeline` (within `rank_jobs.py`):** Orchestrates the core workflow: loads config, initializes models, loads prompts, processes user CV, loops through JDs (handling caching, generation, embedding, similarity, explanations), sorts results, and **returns the ranked list as a data structure**.
+- **`main` (within `rank_jobs.py`):** Serves as the **CLI entry point**. Calls `run_ranking_pipeline` to get the results, then formats and prints the ranked list to the console. Handles top-level error catching for the CLI execution.
 
-**4. Data Flow (Execution via `just rank` or `python src/rank_jobs.py`):**
+**4. Data Flow (Execution via `just rank` or `python -m job-rank.rank_jobs`):**
 ```mermaid
 graph TD
-    subgraph Input
-        Config[config.yaml]
+    subgraph CLI_Execution [main() in rank_jobs.py]
+        Start[Start CLI] --> CallPipeline(Call run_ranking_pipeline)
+        CallPipeline --> ReceiveResults{Receive Ranked Data}
+        ReceiveResults --> FormatPrint[Format & Print Results to Console]
+        FormatPrint --> End[End CLI]
+    end
+
+    subgraph Core_Pipeline [run_ranking_pipeline() in rank_jobs.py]
+        subgraph Input
+            Config[config.yaml]
         Env[.env]
         SysPrompt[prompts/system_message.txt]
         ExpPrompt[prompts/explanation_prompt.txt]
@@ -137,13 +146,23 @@ graph TD
     end
 
     subgraph Output
-        Rank[Rank JDs by Score]
-        Print[Print Ranked List w/ Explanations]
+        StoreResult --> LoopJDs
+    end
+
+    subgraph OutputProcessing
+        SortResults[Sort Results by Score]
+        ReturnData[Return Ranked Data Structure]
     end
 
     Input --> Initialization
     Initialization --> Processing
-    Processing --> Output
+    Processing --> OutputProcessing
+    OutputProcessing --> ReturnData
+```
+
+    Start --> CallPipeline --> ReceiveResults --> FormatPrint --> End
+    CallPipeline --> Core_Pipeline --> ReturnData --> ReceiveResults
+
 ```
 
 **5. Error Handling:**

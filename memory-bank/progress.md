@@ -1,8 +1,8 @@
 # Progress: Job Description Ranker
 
-**Date:** 2025-04-22 (Updated 2025-04-22 13:16 UTC)
+**Date:** 2025-04-23 (Updated 2025-04-23 09:51 UTC)
 
-**Current Status:** Developer tooling (`justfile`) refined, `mypy` issue fixed. Explanation caching previously implemented.
+**Current Status:** Core logic refactored into a testable pipeline function (`run_ranking_pipeline`). Basic unit test added for the pipeline.
 
 **What Works:**
 - Project setup complete (Memory Bank, `.clinerules`, data files, `.gitignore`, dependencies).
@@ -17,30 +17,30 @@
     - **Explanations are now cached** based on ideal CV key, user CV, explanation prompt, and LLM config.
     - Cache hits/misses are handled for both ideal CVs/embeddings and explanations.
 - **Core Logic:**
-    - Functions for API key loading, model initialization, text loading, ideal CV generation, embedding, similarity calculation, and explanation generation are implemented in `src/rank_jobs.py`.
-    - Explanation caching functions (`get_explanation_cache_key`, etc.) added.
-    - Main execution logic orchestrates the workflow using config, caching (including explanation caching), and explanation generation.
+    - Helper functions for API key loading, model initialization, text loading, ideal CV generation, embedding, similarity calculation, caching, and explanation generation are implemented in `rank_jobs.py`.
+    - **`run_ranking_pipeline` function encapsulates the core workflow and returns structured results.**
+    - **`main` function acts as the CLI entry point, calling the pipeline and printing results.**
 - **Explainability:**
     - LLM-based explanation generated *only if* similarity score >= `explanation_threshold`.
     - Explanation (or skipped message) included in the final ranked output.
     - Explanation caching implemented to reduce redundant LLM calls.
 - **Testing:**
     - `pytest` framework set up.
-    - Unit tests for `load_config` function pass (updated for threshold).
+    - Unit tests for `load_config` function pass.
     - Unit tests for ideal CV/embedding caching functions pass using mocks.
+    - **Basic unit test for `run_ranking_pipeline` added (`tests/test_pipeline.py`), using mocks and passing.**
 - **Developer Tooling:**
     - `justfile` provides comprehensive commands for running, testing, linting, formatting, and cache management.
-    - Placeholder `main.py` removed.
 - **Type Checking:**
     - `mypy` runs successfully after fixing `sklearn` import issue.
 
 **What's Left to Build (Immediate Next Steps):**
-1.  **Memory Bank Update:** Update `systemPatterns.md` and `techContext.md` to reflect `justfile` changes and `main.py` removal. Update `.clinerules` with `just` usage notes.
+1.  **Documentation:** Update `README.md` to explain how users can configure `config.yaml` to use their own local CV and JD files.
 2.  **Refinement:**
     - Analyze the quality and usefulness of generated "Explanations" (for scores >= threshold).
     - Refine `prompts/explanation_prompt.txt` if necessary.
-3.  **Further Testing:** Consider adding unit tests for the new explanation caching functions (`get_explanation_cache_key`, etc.).
-4.  **Future Features:** Discuss and prioritize next features (e.g., multi-lingual CV support, CLI/API compatibility).
+3.  **Further Testing:** Consider adding more detailed tests for `run_ranking_pipeline` (e.g., testing cache hits specifically) and tests for explanation caching functions.
+4.  **Future Features:** Discuss and prioritize next major features (e.g., Web UI, multi-lingual support, optimization).
 
 **Known Issues:**
 - Requires `OPENAI_API_KEY` in `.env` to function fully.
