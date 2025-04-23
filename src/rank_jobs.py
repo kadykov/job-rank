@@ -276,184 +276,192 @@ def calculate_similarity(embedding1, embedding2):
     return cosine_similarity(embedding1, embedding2)[0][0]
 
 
-# --- Main Execution ---
+# --- Core Pipeline ---
+
+
+def run_ranking_pipeline(config_path="config.yaml") -> list[dict]:
+    """Runs the full job ranking pipeline and returns the results."""
+    print("Starting Job Description Ranking Pipeline...")
+    # --- Load Config, API Key, Models, Prompts ---
+    config = load_config(config_path)
+    print("Configuration loaded.")
+
+    api_key = load_api_key()
+    llm, embedding_model = initialize_models(api_key, config)
+    print("Models initialized.")
+
+    # Load system prompt
+    system_prompt_path = config["prompts"]["system_message_file"]
+    print(f"Loading system prompt from: {system_prompt_path}")
+    system_prompt_text = load_text(system_prompt_path)
+    if not system_prompt_text:
+        raise FileNotFoundError(f"System prompt not found at {system_prompt_path}")
+    print("System prompt loaded.")
+
+    # Load explanation prompt
+    explanation_prompt_path = config["prompts"]["explanation_prompt_file"]
+    print(f"Loading explanation prompt from: {explanation_prompt_path}")
+    explanation_prompt_text = load_text(explanation_prompt_path)
+    if not explanation_prompt_text:
+        print(
+            "Warning: Failed to load explanation prompt. Explanations will be skipped."
+        )
+        explanation_prompt_text = None  # Allow continuation
+
+    cache_config = config["cache"]
+    cache_enabled = cache_config["enabled"]
+    cache_dir = Path(cache_config["directory"]) if cache_enabled else None
+    if cache_enabled:
+        print(f"Caching enabled. Cache directory: {cache_dir}")
+
+    # --- Load and Embed User CV ---
+    cv_path = config["cv_path"]
+    print(f"Loading user CV from: {cv_path}")
+    user_cv_text = load_text(cv_path)
+    if not user_cv_text:
+        raise FileNotFoundError(f"User CV not found at {cv_path}")
+
+    print("Embedding user CV...")
+    user_cv_embedding = get_embedding(embedding_model, user_cv_text)
+    if user_cv_embedding is None:
+        raise ValueError("Failed to embed user CV.")
+    print("User CV embedded.")
+
+    # --- Process Job Descriptions ---
+    results = []
+    jd_dir = config["jd_dir"]
+    jd_files = glob.glob(os.path.join(jd_dir, "*.md"))
+    print(f"Found {len(jd_files)} job descriptions in {jd_dir}")
+
+    if not jd_files:
+        print(f"No job description files (.md) found in {jd_dir}.")
+        return []  # Return empty list
+
+    for jd_path in jd_files:
+        jd_filename = os.path.basename(jd_path)
+        print(f"\nProcessing JD: {jd_filename}")
+
+        # Load JD
+        jd_text = load_text(jd_path)
+        if not jd_text:
+            print(f"Skipping {jd_filename} due to loading error.")
+            continue
+
+        ideal_cv_text = None
+        ideal_cv_embedding = None
+        cache_key = None
+
+        # --- Cache Check ---
+        if cache_enabled:
+            cache_key = get_cache_key(jd_path, jd_text, config, system_prompt_text)
+            ideal_cv_text, ideal_cv_embedding = load_from_cache(cache_dir, cache_key)
+
+        # --- Generation/Embedding (if not cached) ---
+        if ideal_cv_text is None or ideal_cv_embedding is None:
+            if cache_enabled and cache_key:  # Check cache_key exists before printing
+                print(f"Cache miss for key {cache_key[:8]}...")
+
+            # Generate Ideal CV
+            ideal_cv_text = generate_ideal_cv(llm, jd_text, system_prompt_text)
+            if not ideal_cv_text:
+                print(f"Failed to generate Ideal CV for {jd_filename}. Skipping.")
+                continue
+
+            # Embed Ideal CV
+            ideal_cv_embedding = get_embedding(embedding_model, ideal_cv_text)
+            if ideal_cv_embedding is None:
+                print(f"Failed to embed Ideal CV for {jd_filename}. Skipping.")
+                continue
+
+            # --- Save to Cache ---
+            if cache_enabled and cache_key:
+                save_to_cache(cache_dir, cache_key, ideal_cv_text, ideal_cv_embedding)
+
+        # --- Calculate Similarity ---
+        similarity_score = calculate_similarity(user_cv_embedding, ideal_cv_embedding)
+        print(f"Similarity score for {jd_filename}: {similarity_score:.4f}")
+
+        # --- Generate/Cache Explanation (Conditional) ---
+        explanation = None  # Default to None
+        explanation_threshold = config["cache"]["explanation_threshold"]
+
+        if not explanation_prompt_text:
+            explanation = "Explanation skipped (prompt not loaded)."
+        elif not ideal_cv_text:
+            explanation = "Explanation skipped (ideal CV generation failed)."
+        elif similarity_score >= explanation_threshold:
+            # Only proceed if score is above threshold
+            explanation_cache_key = None
+            if cache_enabled and cache_key:  # Need ideal_cv cache key
+                explanation_cache_key = get_explanation_cache_key(
+                    cache_key, user_cv_text, explanation_prompt_text, config
+                )
+                explanation = load_explanation_from_cache(
+                    cache_dir, explanation_cache_key
+                )
+
+            if explanation is None:  # Cache miss or caching disabled
+                if cache_enabled and explanation_cache_key:  # Check key exists
+                    print(
+                        f"Explanation cache miss for key {explanation_cache_key[:8]}..."
+                    )
+                explanation = generate_explanation(
+                    llm, explanation_prompt_text, user_cv_text, ideal_cv_text
+                )
+                # Save to cache if generated successfully and caching enabled
+                if (
+                    explanation != "Explanation generation failed."
+                    and cache_enabled
+                    and explanation_cache_key
+                ):
+                    save_explanation_to_cache(
+                        cache_dir, explanation_cache_key, explanation
+                    )
+        else:
+            # Score is below threshold
+            explanation = f"Explanation skipped (score {similarity_score:.4f} < threshold {explanation_threshold})."
+
+        results.append(
+            {
+                "jd": jd_filename,
+                "score": similarity_score,
+                "explanation": explanation,
+            }
+        )
+
+    # --- Rank Results ---
+    print("\nRanking complete.")
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return results  # Return the data structure
+
+
+# --- Main Execution (CLI Entry Point) ---
 
 
 def main():
-    print("Starting Job Description Ranker...")
+    """CLI entry point to run the pipeline and print results."""
+    print("Starting Job Description Ranker (CLI)...")
     try:
-        # Load configuration first
-        config = load_config()
-        print("Configuration loaded.")
+        # Run the core pipeline
+        ranked_results = run_ranking_pipeline()  # Use default config path
 
-        api_key = load_api_key()
-        llm, embedding_model = initialize_models(api_key, config)
-        print("Models initialized.")
-
-        # Load system prompt
-        system_prompt_path = config["prompts"]["system_message_file"]
-        print(f"Loading system prompt from: {system_prompt_path}")
-        system_prompt_text = load_text(system_prompt_path)
-        if not system_prompt_text:
-            print("Failed to load system prompt. Exiting.")
-        print("System prompt loaded.")
-
-        # Load explanation prompt
-        explanation_prompt_path = config["prompts"]["explanation_prompt_file"]
-        print(f"Loading explanation prompt from: {explanation_prompt_path}")
-        explanation_prompt_text = load_text(explanation_prompt_path)
-        if not explanation_prompt_text:
-            print("Failed to load explanation prompt. Explanations will be skipped.")
-            # Allow continuation without explanations if prompt fails to load
-            explanation_prompt_text = None  # Set to None to indicate failure
-
-        cache_config = config["cache"]
-        cache_enabled = cache_config["enabled"]
-        cache_dir = Path(cache_config["directory"]) if cache_enabled else None
-        if cache_enabled:
-            print(f"Caching enabled. Cache directory: {cache_dir}")
-
-        # 1. Load and embed the user's CV
-        cv_path = config["cv_path"]
-        print(f"Loading user CV from: {cv_path}")
-        user_cv_text = load_text(cv_path)
-        if not user_cv_text:
-            print("Failed to load user CV. Exiting.")
-            return
-
-        print("Embedding user CV...")
-        user_cv_embedding = get_embedding(embedding_model, user_cv_text)
-        if user_cv_embedding is None:
-            print("Failed to embed user CV. Exiting.")
-            return
-        print("User CV embedded.")
-
-        # 2. Process Job Descriptions
-        results = []
-        jd_dir = config["jd_dir"]
-        jd_files = glob.glob(os.path.join(jd_dir, "*.md"))
-        print(f"Found {len(jd_files)} job descriptions in {jd_dir}")
-
-        if not jd_files:
-            print(f"No job description files (.md) found in {jd_dir}. Exiting.")
-            return
-
-        for jd_path in jd_files:
-            jd_filename = os.path.basename(jd_path)
-            print(f"\nProcessing JD: {jd_filename}")
-
-            # Load JD
-            jd_text = load_text(jd_path)
-            if not jd_text:
-                print(f"Skipping {jd_filename} due to loading error.")
-                continue
-
-            ideal_cv_text = None
-            ideal_cv_embedding = None
-            cache_key = None
-
-            # --- Cache Check ---
-            if cache_enabled:
-                cache_key = get_cache_key(jd_path, jd_text, config, system_prompt_text)
-                ideal_cv_text, ideal_cv_embedding = load_from_cache(
-                    cache_dir, cache_key
-                )
-
-            # --- Generation/Embedding (if not cached) ---
-            if ideal_cv_text is None or ideal_cv_embedding is None:
-                if cache_enabled:
-                    print(f"Cache miss for key {cache_key[:8]}...")
-
-                # Generate Ideal CV
-                ideal_cv_text = generate_ideal_cv(llm, jd_text, system_prompt_text)
-                if not ideal_cv_text:
-                    print(f"Failed to generate Ideal CV for {jd_filename}. Skipping.")
-                    continue
-                # print(f"--- Ideal CV for {jd_filename} ---\n{ideal_cv_text}\n-----------------------------") # Optional: print generated CV
-
-                # Embed Ideal CV
-                ideal_cv_embedding = get_embedding(embedding_model, ideal_cv_text)
-                if ideal_cv_embedding is None:
-                    print(f"Failed to embed Ideal CV for {jd_filename}. Skipping.")
-                    continue
-
-                # --- Save to Cache ---
-                if cache_enabled and cache_key:
-                    save_to_cache(
-                        cache_dir, cache_key, ideal_cv_text, ideal_cv_embedding
-                    )
-
-            # --- Calculate Similarity ---
-            similarity_score = calculate_similarity(
-                user_cv_embedding, ideal_cv_embedding
-            )
-            print(f"Similarity score for {jd_filename}: {similarity_score:.4f}")
-
-            # --- Generate/Cache Explanation (Conditional) ---
-            explanation = None  # Default to None
-            explanation_threshold = config["cache"]["explanation_threshold"]
-
-            if not explanation_prompt_text:
-                explanation = "Explanation skipped (prompt not loaded)."
-            elif not ideal_cv_text:
-                explanation = "Explanation skipped (ideal CV generation failed)."
-            elif similarity_score >= explanation_threshold:
-                # Only proceed if score is above threshold
-                explanation_cache_key = None
-                if cache_enabled and cache_key:  # Need ideal_cv cache key
-                    explanation_cache_key = get_explanation_cache_key(
-                        cache_key, user_cv_text, explanation_prompt_text, config
-                    )
-                    explanation = load_explanation_from_cache(
-                        cache_dir, explanation_cache_key
-                    )
-
-                if explanation is None:  # Cache miss or caching disabled
-                    if cache_enabled:
-                        print(
-                            f"Explanation cache miss for key {explanation_cache_key[:8]}..."
-                        )
-                    explanation = generate_explanation(
-                        llm, explanation_prompt_text, user_cv_text, ideal_cv_text
-                    )
-                    # Save to cache if generated successfully and caching enabled
-                    if (
-                        explanation != "Explanation generation failed."
-                        and cache_enabled
-                        and explanation_cache_key
-                    ):
-                        save_explanation_to_cache(
-                            cache_dir, explanation_cache_key, explanation
-                        )
-            else:
-                # Score is below threshold
-                explanation = f"Explanation skipped (score {similarity_score:.4f} < threshold {explanation_threshold})."
-
-            results.append(
-                {
-                    "jd": jd_filename,
-                    "score": similarity_score,
-                    "explanation": explanation,
-                }
-            )
-
-        # 3. Rank and Print Results
-        if not results:
+        # Print the results
+        if not ranked_results:
             print("No job descriptions were successfully processed.")
             return
 
-        print("\n--- Ranking Results ---")
-        results.sort(key=lambda x: x["score"], reverse=True)
-
-        for i, result in enumerate(results):
+        print("\n--- Final Ranked Results ---")
+        for i, result in enumerate(ranked_results):
             print(f"\n--- Rank {i + 1} ---")
             print(f"Job Description: {result['jd']}")
             print(f"Similarity Score: {result['score']:.4f}")
             print(f"Explanation:\n{result['explanation']}")
             print("-" * 20)
 
+    except FileNotFoundError as fnfe:
+        print(f"Error: Required file not found: {fnfe}")
     except ValueError as ve:
-        print(f"Configuration Error: {ve}")
+        print(f"Configuration or Value Error: {ve}")
     except Exception as e:
         print(f"An unexpected error occurred: {e}")
 
