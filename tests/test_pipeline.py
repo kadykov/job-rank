@@ -6,7 +6,7 @@ import pytest
 import yaml
 
 # Project should be installed editable, so import directly from the package name
-from rank_jobs import run_ranking_pipeline
+from job_rank.rank_jobs import run_ranking_pipeline
 
 # --- Test Fixtures ---
 
@@ -64,12 +64,12 @@ def temp_test_env(tmp_path):
 # --- Test Cases ---
 
 
-@patch("rank_jobs.load_api_key")
-@patch("rank_jobs.initialize_models")
-@patch("rank_jobs.get_embedding")
-@patch("rank_jobs.generate_ideal_cv")
-@patch("rank_jobs.generate_explanation")
-@patch("rank_jobs.glob.glob")  # Mock glob to control found files
+@patch("job_rank.rank_jobs.load_api_key")
+@patch("job_rank.rank_jobs.initialize_models")
+@patch("job_rank.rank_jobs.get_embedding")
+@patch("job_rank.rank_jobs.generate_ideal_cv")
+@patch("job_rank.rank_jobs.generate_explanation")
+@patch("job_rank.rank_jobs.glob.glob")  # Mock glob to control found files
 def test_run_ranking_pipeline_success(
     mock_glob,
     mock_generate_explanation,

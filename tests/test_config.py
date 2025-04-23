@@ -1,6 +1,6 @@
 import pytest
 
-from rank_jobs import load_config  # Import the module directly
+from job_rank.rank_jobs import load_config  # Import the module directly
 
 # --- Fixtures ---
 

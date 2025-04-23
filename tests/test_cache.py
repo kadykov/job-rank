@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 # Functions to test (import directly from the installed module)
-from rank_jobs import (
+from job_rank.rank_jobs import (
     get_cache_key,
     get_cache_paths,
     # New functions for explanation caching
@@ -19,7 +19,7 @@ from rank_jobs import (
 )
 
 # Need to patch functions within the correct module path now
-MODULE_PATH = "rank_jobs"
+MODULE_PATH = "job_rank.rank_jobs"
 
 # --- Test Data ---
 
